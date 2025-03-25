@@ -9,4 +9,3 @@ langchain-huggingface
 langchain-core
 faiss-cpu
 flask
-recordrtc
