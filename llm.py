@@ -3,6 +3,7 @@ import os
 import speech_recognition as sr
 import pyttsx3
 import threading
+import base64
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -97,19 +98,22 @@ def generate_response(question, context=""):
     except Exception as e:
         return f"Error: {e}"
 
-# Voice Recording (Using RecordRTC)
+# Voice Recording (Using JavaScript)
 st.markdown("""
     <script>
-        let recordRTC;
+        let mediaRecorder;
+        let audioChunks = [];
         function startRecording() {
             navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-                recordRTC = RecordRTC(stream, { type: 'audio' });
-                recordRTC.startRecording();
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.start();
+                mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
             });
         }
         function stopRecording() {
-            recordRTC.stopRecording(() => {
-                let audioBlob = recordRTC.getBlob();
+            mediaRecorder.stop();
+            mediaRecorder.onstop = () => {
+                let audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
                 let reader = new FileReader();
                 reader.readAsDataURL(audioBlob);
                 reader.onloadend = () => {
@@ -123,7 +127,7 @@ st.markdown("""
                         document.getElementById('submit_button').click();
                     });
                 };
-            });
+            };
         }
     </script>
     <button onclick="startRecording()">🎙️ Start Recording</button>
@@ -139,11 +143,12 @@ app = Flask(__name__)
 @app.route('/_st_audio_upload', methods=['POST'])
 def process_audio():
     data = request.get_json()
-    audio_data = data['audio']
+    audio_data = base64.b64decode(data['audio'])
     recognizer = sr.Recognizer()
     try:
-        audio_file = sr.AudioFile(audio_data)
-        with audio_file as source:
+        with open("temp_audio.wav", "wb") as f:
+            f.write(audio_data)
+        with sr.AudioFile("temp_audio.wav") as source:
             audio = recognizer.record(source)
         text = recognizer.recognize_google(audio)
         return jsonify({"text": text})
