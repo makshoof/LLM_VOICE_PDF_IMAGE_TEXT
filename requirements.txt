@@ -1,0 +1,10 @@
+streamlit
+speechrecognition
+pyttsx3
+pypiwin32 
+python-dotenv
+langchain
+langchain-groq
+langchain-huggingface
+langchain-community
+Pillow
