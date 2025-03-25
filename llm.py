@@ -1,8 +1,5 @@
 import streamlit as st
 import os
-import sounddevice as sd
-import numpy as np
-import wavio
 import speech_recognition as sr
 import pyttsx3
 import threading
@@ -100,34 +97,58 @@ def generate_response(question, context=""):
     except Exception as e:
         return f"Error: {e}"
 
-# Voice Input Function (Using sounddevice)
-def recognize_speech():
-    samplerate = 44100  # Sample rate (Hz)
-    duration = 5  # Recording duration (seconds)
-    
-    st.info("🎤 Listening... Speak now!")
-    
+# Voice Recording (Using RecordRTC)
+st.markdown("""
+    <script>
+        let recordRTC;
+        function startRecording() {
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                recordRTC = RecordRTC(stream, { type: 'audio' });
+                recordRTC.startRecording();
+            });
+        }
+        function stopRecording() {
+            recordRTC.stopRecording(() => {
+                let audioBlob = recordRTC.getBlob();
+                let reader = new FileReader();
+                reader.readAsDataURL(audioBlob);
+                reader.onloadend = () => {
+                    let base64data = reader.result.split(',')[1];
+                    fetch('/_st_audio_upload', {
+                        method: 'POST',
+                        body: JSON.stringify({ audio: base64data }),
+                        headers: { 'Content-Type': 'application/json' }
+                    }).then(response => response.json()).then(data => {
+                        document.getElementById('transcribed_text').value = data.text;
+                        document.getElementById('submit_button').click();
+                    });
+                };
+            });
+        }
+    </script>
+    <button onclick="startRecording()">🎙️ Start Recording</button>
+    <button onclick="stopRecording()">🛑 Stop Recording</button>
+    <input type="hidden" id="transcribed_text">
+    <button id="submit_button" style="display:none;"></button>
+""", unsafe_allow_html=True)
+
+# API to handle audio transcription
+from flask import Flask, request, jsonify
+app = Flask(__name__)
+
+@app.route('/_st_audio_upload', methods=['POST'])
+def process_audio():
+    data = request.get_json()
+    audio_data = data['audio']
+    recognizer = sr.Recognizer()
     try:
-        # Record audio using sounddevice
-        recording = sd.rec(int(samplerate * duration), samplerate=samplerate, channels=1, dtype=np.int16)
-        sd.wait()  # Wait until recording is finished
-        
-        # Save recorded audio temporarily
-        wavio.write("temp_audio.wav", recording, samplerate, sampwidth=2)
-        
-        # Use speech recognition to process the recorded audio
-        recognizer = sr.Recognizer()
-        with sr.AudioFile("temp_audio.wav") as source:
+        audio_file = sr.AudioFile(audio_data)
+        with audio_file as source:
             audio = recognizer.record(source)
-            text = recognizer.recognize_google(audio)
-        
-        return text
-    except sr.UnknownValueError:
-        return "Sorry, I couldn't understand. Try again!"
-    except sr.RequestError:
-        return "Speech recognition service unavailable!"
+        text = recognizer.recognize_google(audio)
+        return jsonify({"text": text})
     except Exception as e:
-        return f"Error: {e}"
+        return jsonify({"text": f"Error: {e}"})
 
 # Display Chat
 st.write("💬 **Chat with me!**")
@@ -136,14 +157,8 @@ for message in st.session_state.messages:
     with st.chat_message(role):
         st.write(message["content"])
 
-# User Input (Text or Voice)
-user_input = ""
-if voice_enabled:
-    if st.button("🎙️ Speak Now"):
-        user_input = recognize_speech()
-        st.write(f"🗣️ You said: {user_input}")
-else:
-    user_input = st.chat_input("Type your message or ask about the uploaded file...")
+# User Input (Text)
+user_input = st.chat_input("Type your message or ask about the uploaded file...")
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
