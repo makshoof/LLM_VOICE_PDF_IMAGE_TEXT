@@ -3,6 +3,7 @@ import os
 import speech_recognition as sr
 import pyttsx3
 import threading
+import tempfile
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -14,14 +15,13 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from PIL import Image
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
 
 # Load environment variables
 load_dotenv()
 API_KEY = os.getenv("GROQ_API_KEY")
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-# TTS Function
+# TTS Function (Speaks AI Response)
 def speak(text):
     """Speak text using pyttsx3 in a separate thread."""
     def _speak():
@@ -37,7 +37,7 @@ def speak(text):
     thread = threading.Thread(target=_speak, daemon=True)
     thread.start()
 
-# Sidebar for Page Navigation
+# Sidebar Navigation
 st.sidebar.title("🗂️ Navigation")
 page = st.sidebar.radio("Go to:", ["Chatbot (Text & File)", "Voice Chat"])
 
@@ -130,33 +130,36 @@ if page == "Chatbot (Text & File)":
 elif page == "Voice Chat":
     st.title("🎙️ Voice Chat with AI")
 
-    class AudioProcessor(AudioProcessorBase):
-        def recv_audio(self, frame):
-            recognizer = sr.Recognizer()
-            with sr.AudioFile(frame.to_ndarray().tobytes()) as source:
-                try:
-                    audio_data = recognizer.record(source)
-                    text = recognizer.recognize_google(audio_data)
-                    st.session_state["user_voice_input"] = text
-                    st.success(f"🗣️ Transcription: {text}")
-                except sr.UnknownValueError:
-                    st.warning("🔇 Couldn't recognize the speech. Try again.")
-                except sr.RequestError:
-                    st.error("❌ Speech recognition service is unavailable.")
+    # **Record Voice**
+    st.write("🎤 Click to record your voice and get an AI response!")
 
-    webrtc_ctx = webrtc_streamer(key="speech", mode=WebRtcMode.SENDONLY, audio_processor_factory=AudioProcessor)
-    st.info("🎤 Speak now...")
+    audio_bytes = st.audio_input("Record Voice", format="audio/wav")
 
-    if "user_voice_input" in st.session_state:
-        voice_text = st.session_state["user_voice_input"]
-        st.write(f"🗣️ You said: {voice_text}")
+    if audio_bytes:
+        # Save the recorded audio temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
+            tmpfile.write(audio_bytes)
+            tmpfile_path = tmpfile.name
 
-        # Generate AI response
-        response = generate_response(voice_text)
+        # **Recognize Speech**
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(tmpfile_path) as source:
+            try:
+                audio_data = recognizer.record(source)
+                voice_text = recognizer.recognize_google(audio_data)
+                st.write(f"🗣️ You said: **{voice_text}**")
 
-        # Display Response
-        st.write("🤖 AI says:")
-        st.write(response)
+                # **Generate AI Response**
+                response = generate_response(voice_text)
 
-        # Speak Response
-        speak(response)
+                # **Display Response**
+                st.write("🤖 AI says:")
+                st.write(response)
+
+                # **Speak Response**
+                speak(response)
+
+            except sr.UnknownValueError:
+                st.warning("🔇 Couldn't recognize the speech. Try again.")
+            except sr.RequestError:
+                st.error("❌ Speech recognition service is unavailable.")
