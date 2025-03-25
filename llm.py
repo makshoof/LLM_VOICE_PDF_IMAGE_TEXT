@@ -14,25 +14,23 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from PIL import Image
+from pydub import AudioSegment
 
 # Load environment variables
 load_dotenv()
-API_KEY = os.getenv("GROQ_API_KEY")
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 # Text-to-Speech (TTS) Function
 def speak(text):
-    """Speak text using pyttsx3 in a separate thread."""
     def _speak():
         try:
             engine = pyttsx3.init()
             engine.setProperty('rate', 150)
             engine.setProperty('volume', 1.0)
-            print(f"🔊 Speaking: {text}")  # Debugging print
             engine.say(text)
             engine.runAndWait()
         except Exception as e:
-            print(f"❌ Speech Error: {e}")
+            st.error(f"Speech Error: {e}")
 
     thread = threading.Thread(target=_speak, daemon=True)
     thread.start()
@@ -54,11 +52,12 @@ if "vectors" not in st.session_state:
     st.session_state.vectors = None
 
 # File Upload
-uploaded_files = st.file_uploader("+", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=False)
+uploaded_files = st.file_uploader("+", type=["pdf", "png", "jpg", "jpeg", "mp3", "wav"])
 
 def process_files():
     if uploaded_files:
-        if uploaded_files.type == "application/pdf":
+        file_ext = uploaded_files.type
+        if file_ext == "application/pdf":
             with open("temp.pdf", "wb") as f:
                 f.write(uploaded_files.read())
             loader = PyPDFLoader("temp.pdf")
@@ -67,11 +66,16 @@ def process_files():
             final_documents = text_splitter.split_documents(docs)
             st.session_state.vectors = FAISS.from_documents(final_documents, embeddings)
             st.success("✅ PDF processed successfully!")
-        else:
+        elif "image" in file_ext:
             image = Image.open(uploaded_files)
             st.image(image, caption="Uploaded Image", use_column_width=True)
             st.session_state.image = image
             st.success("✅ Image uploaded successfully!")
+        elif "audio" in file_ext:
+            audio = AudioSegment.from_file(uploaded_files)
+            audio.export("temp.wav", format="wav")
+            st.session_state.audio_file = "temp.wav"
+            st.success("✅ Audio uploaded successfully!")
 
 process_files()
 
@@ -88,7 +92,9 @@ prompt = ChatPromptTemplate.from_template(
 )
 
 def generate_response(question, context=""):
-    """Generate response using LLM."""
+    if not api_key:
+        return "❌ Error: Please enter a valid API key in the sidebar."
+    
     try:
         llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=api_key, temperature=temperature, max_tokens=max_tokens)
         output_parser = StrOutputParser()
@@ -104,12 +110,21 @@ def recognize_speech():
         st.info("🎤 Listening... Speak now!")
         try:
             audio = recognizer.listen(source, timeout=5)
-            text = recognizer.recognize_google(audio)
-            return text
+            return recognizer.recognize_google(audio)
         except sr.UnknownValueError:
             return "Sorry, I couldn't understand. Try again!"
         except sr.RequestError:
             return "Speech recognition service unavailable!"
+
+# Audio File Transcription
+def transcribe_audio():
+    recognizer = sr.Recognizer()
+    try:
+        with sr.AudioFile("temp.wav") as source:
+            audio_data = recognizer.record(source)
+            return recognizer.recognize_google(audio_data)
+    except Exception as e:
+        return f"Error: {e}"
 
 # Display Chat
 st.write("💬 **Chat with me!**")
@@ -118,12 +133,15 @@ for message in st.session_state.messages:
     with st.chat_message(role):
         st.write(message["content"])
 
-# User Input (Text or Voice)
+# User Input (Text, Voice, or Audio File)
 user_input = ""
 if voice_enabled:
     if st.button("🎙️ Speak Now"):
         user_input = recognize_speech()
         st.write(f"🗣️ You said: {user_input}")
+elif "audio_file" in st.session_state:
+    user_input = transcribe_audio()
+    st.write(f"🎵 Transcribed Audio: {user_input}")
 else:
     user_input = st.chat_input("Type your message or ask about the uploaded file...")
 
@@ -138,15 +156,14 @@ if user_input:
         retriever = st.session_state.vectors.as_retriever()
         retrieval_chain = create_retrieval_chain(retriever, document_chain)
         context = retrieval_chain.invoke({'input': user_input}).get('answer', "")
-        st.session_state.vectors = None  # Clear vectors after one use
-    
+
     response = generate_response(user_input, context)
     st.session_state.messages.append({"role": "assistant", "content": response})
     with st.chat_message("assistant"):
         st.write(response)
     
     if voice_enabled:
-        speak(response)  # Speak response
+        speak(response)
 
 # Clear Chat Button
 if st.sidebar.button("🗑️ Clear Chat History"):
@@ -154,4 +171,6 @@ if st.sidebar.button("🗑️ Clear Chat History"):
     st.session_state.vectors = None
     if "image" in st.session_state:
         del st.session_state["image"]
+    if "audio_file" in st.session_state:
+        del st.session_state["audio_file"]
     st.success("Chat history cleared!")
