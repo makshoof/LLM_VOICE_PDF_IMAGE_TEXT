@@ -1,10 +1,13 @@
 streamlit
 speechrecognition
+sounddevice
+numpy
+wavio
 pyttsx3
 python-dotenv
-langchain
+pillow
 langchain-groq
 langchain-community
 langchain-huggingface
+langchain-core
 faiss-cpu
-pillow
