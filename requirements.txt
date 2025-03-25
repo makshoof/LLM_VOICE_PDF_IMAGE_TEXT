@@ -4,8 +4,7 @@ pyttsx3
 python-dotenv
 langchain
 langchain-groq
-langchain-huggingface
 langchain-community
-Pillow
-pydub
-ffmpeg
+langchain-huggingface
+faiss-cpu
+pillow
