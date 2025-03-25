@@ -1,5 +1,8 @@
 import streamlit as st
 import os
+import sounddevice as sd
+import numpy as np
+import wavio
 import speech_recognition as sr
 import pyttsx3
 import threading
@@ -97,19 +100,34 @@ def generate_response(question, context=""):
     except Exception as e:
         return f"Error: {e}"
 
-# Voice Input Function
+# Voice Input Function (Using sounddevice)
 def recognize_speech():
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.info("🎤 Listening... Speak now!")
-        try:
-            audio = recognizer.listen(source, timeout=5)
+    samplerate = 44100  # Sample rate (Hz)
+    duration = 5  # Recording duration (seconds)
+    
+    st.info("🎤 Listening... Speak now!")
+    
+    try:
+        # Record audio using sounddevice
+        recording = sd.rec(int(samplerate * duration), samplerate=samplerate, channels=1, dtype=np.int16)
+        sd.wait()  # Wait until recording is finished
+        
+        # Save recorded audio temporarily
+        wavio.write("temp_audio.wav", recording, samplerate, sampwidth=2)
+        
+        # Use speech recognition to process the recorded audio
+        recognizer = sr.Recognizer()
+        with sr.AudioFile("temp_audio.wav") as source:
+            audio = recognizer.record(source)
             text = recognizer.recognize_google(audio)
-            return text
-        except sr.UnknownValueError:
-            return "Sorry, I couldn't understand. Try again!"
-        except sr.RequestError:
-            return "Speech recognition service unavailable!"
+        
+        return text
+    except sr.UnknownValueError:
+        return "Sorry, I couldn't understand. Try again!"
+    except sr.RequestError:
+        return "Speech recognition service unavailable!"
+    except Exception as e:
+        return f"Error: {e}"
 
 # Display Chat
 st.write("💬 **Chat with me!**")
