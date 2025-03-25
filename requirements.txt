@@ -3,8 +3,6 @@ streamlit-webrtc
 speechrecognition
 pyttsx3
 python-dotenv
-av
-pydub
 pillow
 langchain-groq
 langchain-community
