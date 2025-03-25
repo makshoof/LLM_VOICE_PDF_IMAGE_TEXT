@@ -2,8 +2,8 @@ import streamlit as st
 import os
 import speech_recognition as sr
 import pyttsx3
-import threading
 import tempfile
+import av
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -14,28 +14,21 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from PIL import Image
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, ClientSettings
 
 # Load environment variables
 load_dotenv()
 API_KEY = os.getenv("GROQ_API_KEY")
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-# TTS Function (Speaks AI Response)
+# Speech synthesis (AI Voice Response)
 def speak(text):
-    """Speak text using pyttsx3 in a separate thread."""
-    def _speak():
-        try:
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 150)
-            engine.setProperty('volume', 1.0)
-            engine.say(text)
-            engine.runAndWait()
-        except Exception as e:
-            print(f"❌ Speech Error: {e}")
-
-    thread = threading.Thread(target=_speak, daemon=True)
-    thread.start()
+    """Convert text to speech."""
+    engine = pyttsx3.init()
+    engine.setProperty('rate', 150)
+    engine.setProperty('volume', 1.0)
+    engine.say(text)
+    engine.runAndWait()
 
 # Sidebar Navigation
 st.sidebar.title("🗂️ Navigation")
@@ -69,11 +62,6 @@ if page == "Chatbot (Text & File)":
                 final_documents = text_splitter.split_documents(docs)
                 st.session_state.vectors = FAISS.from_documents(final_documents, embeddings)
                 st.success("✅ PDF processed successfully!")
-            else:
-                image = Image.open(uploaded_files)
-                st.image(image, caption="Uploaded Image", use_column_width=True)
-                st.session_state.image = image
-                st.success("✅ Image uploaded successfully!")
 
     process_files()
 
@@ -119,7 +107,6 @@ if page == "Chatbot (Text & File)":
             retriever = st.session_state.vectors.as_retriever()
             retrieval_chain = create_retrieval_chain(retriever, document_chain)
             context = retrieval_chain.invoke({'input': user_input}).get('answer', "")
-            st.session_state.vectors = None  # Clear vectors after one use
         
         response = generate_response(user_input, context)
         st.session_state.messages.append({"role": "assistant", "content": response})
@@ -130,36 +117,43 @@ if page == "Chatbot (Text & File)":
 elif page == "Voice Chat":
     st.title("🎙️ Voice Chat with AI")
 
-    # **Record Voice**
-    st.write("🎤 Click to record your voice and get an AI response!")
+    class AudioProcessor(AudioProcessorBase):
+        """Process audio stream for speech recognition."""
+        def recv(self, frame: av.AudioFrame):
+            audio_data = frame.to_ndarray()
+            recognizer = sr.Recognizer()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
+                tmpfile.write(audio_data.tobytes())
+                tmpfile_path = tmpfile.name
 
-    audio_bytes = st.audio_input("Record Voice", format="audio/wav")
-
-    if audio_bytes:
-        # Save the recorded audio temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
-            tmpfile.write(audio_bytes)
-            tmpfile_path = tmpfile.name
-
-        # **Recognize Speech**
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(tmpfile_path) as source:
             try:
-                audio_data = recognizer.record(source)
-                voice_text = recognizer.recognize_google(audio_data)
-                st.write(f"🗣️ You said: **{voice_text}**")
-
-                # **Generate AI Response**
-                response = generate_response(voice_text)
-
-                # **Display Response**
-                st.write("🤖 AI says:")
-                st.write(response)
-
-                # **Speak Response**
-                speak(response)
-
+                with sr.AudioFile(tmpfile_path) as source:
+                    audio = recognizer.record(source)
+                    text = recognizer.recognize_google(audio)
+                    st.session_state["transcribed_text"] = text
             except sr.UnknownValueError:
-                st.warning("🔇 Couldn't recognize the speech. Try again.")
+                st.session_state["transcribed_text"] = "🔇 Couldn't recognize speech. Try again."
             except sr.RequestError:
-                st.error("❌ Speech recognition service is unavailable.")
+                st.session_state["transcribed_text"] = "❌ Speech recognition service unavailable."
+            return frame
+
+    webrtc_streamer(
+        key="voice-chat",
+        mode="sendonly",
+        audio_processor_factory=AudioProcessor,
+        client_settings=ClientSettings(
+            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+        ),
+    )
+
+    if "transcribed_text" in st.session_state and st.session_state["transcribed_text"]:
+        user_voice_text = st.session_state["transcribed_text"]
+        st.write(f"🗣️ You said: **{user_voice_text}**")
+
+        # **AI Response**
+        response = generate_response(user_voice_text)
+        st.write("🤖 AI says:")
+        st.write(response)
+
+        # **Speak Response**
+        speak(response)
