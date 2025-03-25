@@ -2,8 +2,7 @@ import streamlit as st
 import os
 import speech_recognition as sr
 import pyttsx3
-import tempfile
-import av
+import threading
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -14,146 +13,144 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, ClientSettings
+from PIL import Image
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
 
 # Load environment variables
 load_dotenv()
 API_KEY = os.getenv("GROQ_API_KEY")
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-# Speech synthesis (AI Voice Response)
+# Text-to-Speech (TTS) Function
 def speak(text):
-    """Convert text to speech."""
-    engine = pyttsx3.init()
-    engine.setProperty('rate', 150)
-    engine.setProperty('volume', 1.0)
-    engine.say(text)
-    engine.runAndWait()
-
-# Sidebar Navigation
-st.sidebar.title("🗂️ Navigation")
-page = st.sidebar.radio("Go to:", ["Chatbot (Text & File)", "Voice Chat"])
-
-# 📌 **Main Page - Text & File Chatbot**
-if page == "Chatbot (Text & File)":
-    st.title("🧠 Smart Chatbot (PDF, Image, Text)")
-
-    api_key = st.sidebar.text_input("🔑 Groq API Key:", type="password")
-    temperature = st.sidebar.slider("🌡️ Temperature", 0.0, 1.0, 0.7)
-    max_tokens = st.sidebar.slider("✍️ Max Tokens", 50, 300, 150)
-
-    # Initialize session states
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    if "vectors" not in st.session_state:
-        st.session_state.vectors = None
-
-    # File Upload
-    uploaded_files = st.file_uploader("+", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=False)
-
-    def process_files():
-        if uploaded_files:
-            if uploaded_files.type == "application/pdf":
-                with open("temp.pdf", "wb") as f:
-                    f.write(uploaded_files.read())
-                loader = PyPDFLoader("temp.pdf")
-                docs = loader.load()
-                text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-                final_documents = text_splitter.split_documents(docs)
-                st.session_state.vectors = FAISS.from_documents(final_documents, embeddings)
-                st.success("✅ PDF processed successfully!")
-
-    process_files()
-
-    # Define prompt template
-    prompt = ChatPromptTemplate.from_template(
-        """
-        Answer the questions based on the provided context only.
-        If there is no relevant context, provide a general response.
-        <context>
-        {context}
-        <context>
-        Question: {input}
-        """
-    )
-
-    def generate_response(question, context=""):
-        """Generate response using LLM."""
+    """Speak text using pyttsx3 in a separate thread."""
+    def _speak():
         try:
-            llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=api_key, temperature=temperature, max_tokens=max_tokens)
-            output_parser = StrOutputParser()
-            chain = prompt | llm | output_parser
-            return chain.invoke({'input': question, 'context': context})
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 150)
+            engine.setProperty('volume', 1.0)
+            engine.say(text)
+            engine.runAndWait()
         except Exception as e:
-            return f"Error: {e}"
+            print(f"❌ Speech Error: {e}")
 
-    # Display Chat
-    st.write("💬 **Chat with me!**")
-    for message in st.session_state.messages:
-        role = "user" if message["role"] == "user" else "assistant"
-        with st.chat_message(role):
-            st.write(message["content"])
+    thread = threading.Thread(target=_speak, daemon=True)
+    thread.start()
 
-    user_input = st.chat_input("Type your message or ask about the uploaded file...")
+# Streamlit UI Setup
+st.title("🧠 Smart Chatbot (Voice + PDF + Image + Text)")
 
-    if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.write(user_input)
+# Sidebar Settings
+st.sidebar.title("⚙️ Settings")
+api_key = st.sidebar.text_input("🔑 Groq API Key:", type="password")
+temperature = st.sidebar.slider("🌡️ Temperature", 0.0, 1.0, 0.7)
+max_tokens = st.sidebar.slider("✍️ Max Tokens", 50, 300, 150)
+voice_enabled = st.sidebar.checkbox("🎙️ Enable Voice Chat")
 
-        context = ""
-        if st.session_state.vectors:
-            document_chain = create_stuff_documents_chain(ChatGroq(api_key=api_key, model="llama-3.3-70b-versatile"), prompt)
-            retriever = st.session_state.vectors.as_retriever()
-            retrieval_chain = create_retrieval_chain(retriever, document_chain)
-            context = retrieval_chain.invoke({'input': user_input}).get('answer', "")
-        
-        response = generate_response(user_input, context)
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        with st.chat_message("assistant"):
-            st.write(response)
+# Initialize session states
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "vectors" not in st.session_state:
+    st.session_state.vectors = None
 
-# 🎙️ **Voice Chat Page**
-elif page == "Voice Chat":
-    st.title("🎙️ Voice Chat with AI")
+# File Upload
+uploaded_files = st.file_uploader("+", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=False)
 
-    class AudioProcessor(AudioProcessorBase):
-        """Process audio stream for speech recognition."""
-        def recv(self, frame: av.AudioFrame):
-            audio_data = frame.to_ndarray()
-            recognizer = sr.Recognizer()
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
-                tmpfile.write(audio_data.tobytes())
-                tmpfile_path = tmpfile.name
+def process_files():
+    if uploaded_files:
+        if uploaded_files.type == "application/pdf":
+            with open("temp.pdf", "wb") as f:
+                f.write(uploaded_files.read())
+            loader = PyPDFLoader("temp.pdf")
+            docs = loader.load()
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+            final_documents = text_splitter.split_documents(docs)
+            st.session_state.vectors = FAISS.from_documents(final_documents, embeddings)
+            st.success("✅ PDF processed successfully!")
+        else:
+            image = Image.open(uploaded_files)
+            st.image(image, caption="Uploaded Image", use_column_width=True)
+            st.session_state.image = image
+            st.success("✅ Image uploaded successfully!")
 
+process_files()
+
+# Define prompt template
+prompt = ChatPromptTemplate.from_template(
+    """
+    Answer the questions based on the provided context only.
+    If there is no relevant context, provide a general response.
+    <context>
+    {context}
+    <context>
+    Question: {input}
+    """
+)
+
+def generate_response(question, context=""):
+    """Generate response using LLM."""
+    try:
+        llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=api_key, temperature=temperature, max_tokens=max_tokens)
+        output_parser = StrOutputParser()
+        chain = prompt | llm | output_parser
+        return chain.invoke({'input': question, 'context': context})
+    except Exception as e:
+        return f"Error: {e}"
+
+# Voice Recognition Using streamlit_webrtc
+class AudioProcessor(AudioProcessorBase):
+    def recv_audio(self, frame):
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(frame.to_ndarray().tobytes()) as source:
             try:
-                with sr.AudioFile(tmpfile_path) as source:
-                    audio = recognizer.record(source)
-                    text = recognizer.recognize_google(audio)
-                    st.session_state["transcribed_text"] = text
+                audio_data = recognizer.record(source)
+                text = recognizer.recognize_google(audio_data)
+                st.session_state["user_voice_input"] = text
+                st.success(f"🗣️ Transcription: {text}")
             except sr.UnknownValueError:
-                st.session_state["transcribed_text"] = "🔇 Couldn't recognize speech. Try again."
+                st.warning("🔇 Couldn't recognize the speech. Try again.")
             except sr.RequestError:
-                st.session_state["transcribed_text"] = "❌ Speech recognition service unavailable."
-            return frame
+                st.error("❌ Speech recognition service is unavailable.")
 
-    webrtc_streamer(
-        key="voice-chat",
-        mode="sendonly",
-        audio_processor_factory=AudioProcessor,
-        client_settings=ClientSettings(
-            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-        ),
-    )
+if voice_enabled:
+    webrtc_ctx = webrtc_streamer(key="speech", mode=WebRtcMode.SENDONLY, audio_processor_factory=AudioProcessor)
+    st.info("🎤 Speak now...")
 
-    if "transcribed_text" in st.session_state and st.session_state["transcribed_text"]:
-        user_voice_text = st.session_state["transcribed_text"]
-        st.write(f"🗣️ You said: **{user_voice_text}**")
+# Display Chat
+st.write("💬 **Chat with me!**")
+for message in st.session_state.messages:
+    role = "user" if message["role"] == "user" else "assistant"
+    with st.chat_message(role):
+        st.write(message["content"])
 
-        # **AI Response**
-        response = generate_response(user_voice_text)
-        st.write("🤖 AI says:")
+# User Input (Text or Voice)
+user_input = st.chat_input("Type your message...") or st.session_state.get("user_voice_input", "")
+
+if user_input:
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.write(user_input)
+
+    context = ""
+    if st.session_state.vectors:
+        document_chain = create_stuff_documents_chain(ChatGroq(api_key=api_key, model="llama-3.3-70b-versatile"), prompt)
+        retriever = st.session_state.vectors.as_retriever()
+        retrieval_chain = create_retrieval_chain(retriever, document_chain)
+        context = retrieval_chain.invoke({'input': user_input}).get('answer', "")
+        st.session_state.vectors = None  # Clear vectors after one use
+    
+    response = generate_response(user_input, context)
+    st.session_state.messages.append({"role": "assistant", "content": response})
+    with st.chat_message("assistant"):
         st.write(response)
+    
+    if voice_enabled:
+        speak(response)  # Speak response
 
-        # **Speak Response**
-        speak(response)
+# Clear Chat Button
+if st.sidebar.button("🗑️ Clear Chat History"):
+    st.session_state.messages = []
+    st.session_state.vectors = None
+    if "image" in st.session_state:
+        del st.session_state["image"]
+    st.success("Chat history cleared!")
