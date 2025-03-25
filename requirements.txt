@@ -1,7 +1,7 @@
 streamlit
 speechrecognition
 pyttsx3
-pypiwin32==219
+pywin32
 python-dotenv
 langchain
 langchain-groq
