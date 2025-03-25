@@ -1,11 +1,11 @@
 streamlit
 speechrecognition
 pyttsx3
-pypiwin32 ; sys_platform == "win32"
 python-dotenv
 langchain
 langchain-groq
 langchain-huggingface
 langchain-community
 Pillow
-pyaudio
+pydub
+ffmpeg
