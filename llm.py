@@ -2,7 +2,6 @@ import streamlit as st
 import os
 import speech_recognition as sr
 import pyttsx3
-import threading
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -14,35 +13,29 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from PIL import Image
+import platform
 
 # Load environment variables
 load_dotenv()
 API_KEY = os.getenv("GROQ_API_KEY")
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-# Text-to-Speech (TTS) Function
-def speak(text):
-    """Speak text using pyttsx3 in a separate thread."""
-    def _speak():
-        try:
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 150)
-            engine.setProperty('volume', 1.0)
-            print(f"🔊 Speaking: {text}")  # Debugging print
-            engine.say(text)
-            engine.runAndWait()
-        except Exception as e:
-            print(f"❌ Speech Error: {e}")
+# Text-to-Speech Engine Setup for Windows
+engine = pyttsx3.init()
+engine.setProperty('rate', 150)
+engine.setProperty('volume', 1.0)
 
-    thread = threading.Thread(target=_speak, daemon=True)
-    thread.start()
+def speak(text):
+    """Convert text to speech"""
+    engine.say(text)
+    engine.runAndWait()
 
 # Streamlit UI Setup
 st.title("🧠 Smart Chatbot (Voice + PDF + Image + Text)")
 
 # Sidebar Settings
 st.sidebar.title("⚙️ Settings")
-api_key = st.sidebar.text_input("🔑 Groq API Key:", type="password")
+api_key = st.sidebar.text_input("🔑 Groq API Key:", type="password", value=API_KEY)
 temperature = st.sidebar.slider("🌡️ Temperature", 0.0, 1.0, 0.7)
 max_tokens = st.sidebar.slider("✍️ Max Tokens", 50, 300, 150)
 voice_enabled = st.sidebar.checkbox("🎙️ Enable Voice Chat")
