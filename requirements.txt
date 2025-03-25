@@ -1,8 +1,5 @@
 streamlit
 speechrecognition
-sounddevice
-numpy
-wavio
 pyttsx3
 python-dotenv
 pillow
@@ -11,3 +8,5 @@ langchain-community
 langchain-huggingface
 langchain-core
 faiss-cpu
+flask
+recordrtc
