@@ -1,4 +1,5 @@
 streamlit
+streamlit-webrtc
 speechrecognition
 pyttsx3
 python-dotenv
@@ -8,4 +9,3 @@ langchain-community
 langchain-huggingface
 langchain-core
 faiss-cpu
-flask
