@@ -8,3 +8,4 @@ langchain-groq
 langchain-huggingface
 langchain-community
 Pillow
+eSpeak
